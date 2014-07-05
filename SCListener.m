@@ -22,9 +22,9 @@
 
 static SCListener *sharedListener = nil;
 static void listeningCallback(void *inUserData, AudioQueueRef inAQ, AudioQueueBufferRef inBuffer, const AudioTimeStamp *inStartTime, UInt32 inNumberPacketsDescriptions, const AudioStreamPacketDescription *inPacketDescs) {
-	SCListener *listener = (SCListener *)inUserData;
+	SCListener *listener = (__bridge SCListener *)inUserData;
 	if ([listener isListening]){
-		[listener setAudioBuffer:inBuffer->mAudioData length: inBuffer->mAudioDataByteSize];
+		[listener setAudioBuffer:inBuffer->mAudioData length:inBuffer->mAudioDataByteSize];
 		AudioQueueEnqueueBuffer(inAQ, inBuffer, 0, NULL);
 	}
 }
@@ -34,7 +34,7 @@ static void listeningCallback(void *inUserData, AudioQueueRef inAQ, AudioQueueBu
 + (SCListener *)sharedListener {
 	@synchronized(self) {
 		if (sharedListener == nil)
-			[[self alloc] init];
+			sharedListener = [[self alloc] init];
 	}
 
 	return sharedListener;
@@ -42,7 +42,11 @@ static void listeningCallback(void *inUserData, AudioQueueRef inAQ, AudioQueueBu
 
 - (void)dealloc {
 	[sharedListener stop];
-	[super dealloc];
+    NSError *deactivationError = nil;
+    BOOL success = [[AVAudioSession sharedInstance] setActive:NO error:&deactivationError];
+    if (!success) {
+        NSLog(@"%@", [deactivationError localizedDescription]);
+    }
 }
 
 #pragma mark -
@@ -254,7 +258,7 @@ static void listeningCallback(void *inUserData, AudioQueueRef inAQ, AudioQueueBu
 		return;
 
 	[self setupFormat];
-	AudioQueueNewInput(&format, listeningCallback, self, NULL, NULL, 0, &queue);
+	AudioQueueNewInput(&format, listeningCallback, (__bridge void *)(self), NULL, NULL, 0, &queue);
 	[self setupBuffers];
 	[self setupMetering];
 }
@@ -263,23 +267,27 @@ static void listeningCallback(void *inUserData, AudioQueueRef inAQ, AudioQueueBu
 	format.mSampleRate = kSAMPLERATE;
 	format.mFormatID = kAudioFormatLinearPCM;
 	format.mFormatFlags = kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked;
-	format.mFramesPerPacket = format.mChannelsPerFrame = 1;
-	format.mBitsPerChannel = 16;
-	format.mBytesPerPacket = format.mBytesPerFrame = 2;
+	format.mFramesPerPacket = 1;
+    format.mChannelsPerFrame = 2;
+    format.mBitsPerChannel =      sizeof(short) * 8;
+    format.mBytesPerPacket =      sizeof(short) * 2;
+    format.mBytesPerFrame =       sizeof(short) * 2;
+    format.mReserved =            0;
 }
 
 - (void)setupBuffers {
 	AudioQueueBufferRef buffers[3];
 	for (NSInteger i = 0; i < 3; ++i) { 
-		AudioQueueAllocateBuffer(queue, kBUFFERSIZE, &buffers[i]); 
-		AudioQueueEnqueueBuffer(queue, buffers[i], 0, NULL); 
+		AudioQueueAllocateBuffer(queue, kBUFFERSIZE, &buffers[i]);
+		AudioQueueEnqueueBuffer(queue, buffers[i], 0, NULL);
 	}
 }
 
 - (void)setupMetering {
 	levels = (AudioQueueLevelMeterState *)calloc(sizeof(AudioQueueLevelMeterState), format.mChannelsPerFrame);
 	UInt32 trueValue = true;
-	AudioQueueSetProperty(queue, kAudioQueueProperty_EnableLevelMetering, &trueValue, sizeof(UInt32));
+    OSStatus stat = AudioQueueSetProperty(queue, kAudioQueueProperty_EnableLevelMetering, &trueValue, sizeof(UInt32));
+    NSLog(@"AudioQueueSetProperty error: %d", (int)stat);
 }
 
 #pragma mark -
@@ -305,27 +313,30 @@ static void listeningCallback(void *inUserData, AudioQueueRef inAQ, AudioQueueBu
 		return nil;
 	}
 	
-	AudioSessionInitialize(NULL,NULL,NULL,NULL);
-	Float64 rate=kSAMPLERATE;
-	UInt32 size = sizeof(rate);	
-	AudioSessionSetProperty (kAudioSessionProperty_PreferredHardwareSampleRate, size, &rate); 
+//	AudioSessionInitialize(NULL,NULL,NULL,NULL);
+//	Float64 rate=kSAMPLERATE;
+//	UInt32 size = sizeof(rate);	
+//	AudioSessionSetProperty (kAudioSessionProperty_PreferredHardwareSampleRate, size, &rate);
+    BOOL success = NO;
+    NSError *error = nil;
+    
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    
+    success = [session setCategory:AVAudioSessionCategoryPlayback error:&error];
+    if (!success) {
+        NSLog(@"%@ Error setting category: %@",
+              NSStringFromSelector(_cmd), [error localizedDescription]);
+        return self;
+    }
+    [session setCategory:AVAudioSessionCategoryPlayAndRecord error: nil];
+    success = [session setActive:YES error:&error];
+    if (!success) {
+        NSLog(@"%@", [error localizedDescription]);
+    }
 	return self;
 }
 
-- (id)retain {
-	return self;
-}
 
-- (unsigned)retainCount {
-	return UINT_MAX;
-}
 
-- (void)release {
-	// Do nothing.
-}
-
-- (id)autorelease {
-	return self;
-}
 
 @end
