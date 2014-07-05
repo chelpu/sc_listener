@@ -85,7 +85,7 @@ Pod::Spec.new do |s|
   s.source_files  = "src/*.{h,m,c}"
   # s.exclude_files = ""
 
-  s.public_header_files = "src/SCListener.h"
+  s.public_header_files = "src/*.h"
 
 
   # ――― Resources ―――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――――― #
